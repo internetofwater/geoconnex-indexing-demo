@@ -178,19 +178,19 @@ export function geometryParts(geom: Geometry, parts: GeometryParts = { points: [
       parts.points.push(geom.coordinates)
       break
     case 'MultiPoint':
-      parts.points.push(...geom.coordinates)
+      for (const p of geom.coordinates) parts.points.push(p)
       break
     case 'LineString':
       parts.lines.push(geom.coordinates)
       break
     case 'MultiLineString':
-      parts.lines.push(...geom.coordinates)
+      for (const l of geom.coordinates) parts.lines.push(l)
       break
     case 'Polygon':
       parts.polygons.push(geom.coordinates)
       break
     case 'MultiPolygon':
-      parts.polygons.push(...geom.coordinates)
+      for (const p of geom.coordinates) parts.polygons.push(p)
       break
     case 'GeometryCollection':
       geom.geometries.forEach((g) => geometryParts(g, parts))

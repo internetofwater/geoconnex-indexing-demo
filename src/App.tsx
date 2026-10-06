@@ -12,12 +12,13 @@ import { avgCellAreaKm2, cellAt, GRID_KINDS, GRID_META, viewportCells, type Grid
 const VIEWPORT_CELL_LIMIT = 4000
 
 export default function App() {
-  const [levels, setLevels] = useState<Record<GridKind, number>>({ s2: 10, h3: 6 })
-  const [visible, setVisible] = useState<Record<GridKind, boolean>>({ s2: true, h3: true })
+  const [levels, setLevels] = useState<Record<GridKind, number>>({ s2: 10, h3: 6, geohash: 5 })
+  const [visible, setVisible] = useState<Record<GridKind, boolean>>({ s2: true, h3: true, geohash: true })
   const [view, setView] = useState<{ bounds: Bounds; zoom: number } | null>(null)
   const [fitRequest, setFitRequest] = useState<{ bounds: Bounds; key: number } | null>(null)
   const [iriInput, setIriInput] = useState('')
   const [showCover, setShowCover] = useState(true)
+  const [mixedLevels, setMixedLevels] = useState(true)
 
   const cellQueries = useCellQueries()
   const iri = useIriAnalysis()
@@ -28,7 +29,10 @@ export default function App() {
     return out
   }, [view, visible, levels])
 
-  const gridCells = useMemo(() => ({ s2: grids.s2?.cells ?? [], h3: grids.h3?.cells ?? [] }), [grids])
+  const gridCells = useMemo(
+    () => ({ s2: grids.s2?.cells ?? [], h3: grids.h3?.cells ?? [], geohash: grids.geohash?.cells ?? [] }),
+    [grids],
+  )
 
   const selectedCells = useMemo(
     () => GRID_KINDS.flatMap((k) => (cellQueries.queries[k] ? [cellQueries.queries[k].cell] : [])),
@@ -50,11 +54,11 @@ export default function App() {
       const s = iri.results[k]
       const a = s?.state === 'done' ? s.analysis : s?.state === 'running' ? s.previous : undefined
       if (!a) continue
-      if (showCover) cover.push(...a.display)
+      if (showCover) for (const c of mixedLevels ? a.display.mixed : a.display.uniform) cover.push(c)
       if (a.smallest) smallest.push(a.smallest)
     }
     return { cover, smallest }
-  }, [iri.results, showCover])
+  }, [iri.results, showCover, mixedLevels])
 
   const fitTo = (bounds: Bounds | null) => {
     if (bounds) setFitRequest({ bounds, key: Date.now() })
@@ -80,8 +84,9 @@ export default function App() {
         <header className="app-header">
           <h1>Geoconnex spatial indexing</h1>
           <p className="muted small">
-            Compare <strong style={{ color: GRID_META.s2.color }}>S2</strong> and{' '}
-            <strong style={{ color: GRID_META.h3.color }}>H3</strong> cells against features from{' '}
+            Compare <strong style={{ color: GRID_META.s2.color }}>S2</strong>,{' '}
+            <strong style={{ color: GRID_META.h3.color }}>H3</strong> and{' '}
+            <strong style={{ color: GRID_META.geohash.color }}>geohash</strong> cells against features from{' '}
             <a href="https://features.geoconnex.us/collections/GeoconnexFeatures" target="_blank" rel="noreferrer">
               features.geoconnex.us
             </a>
@@ -141,6 +146,8 @@ export default function App() {
           results={iri.results}
           showCover={showCover}
           onShowCoverChange={setShowCover}
+          mixedLevels={mixedLevels}
+          onMixedLevelsChange={setMixedLevels}
         />
         <section className="panel">
           <h2>Features in a cell</h2>
@@ -176,12 +183,11 @@ export default function App() {
           onViewChange={(bounds, zoom) => setView({ bounds, zoom })}
         />
         <div className="legend">
-          <div>
-            <span className="swatch" style={{ background: GRID_META.s2.color }} /> S2
-          </div>
-          <div>
-            <span className="swatch" style={{ background: GRID_META.h3.color }} /> H3
-          </div>
+          {GRID_KINDS.map((k) => (
+            <div key={k}>
+              <span className="swatch" style={{ background: GRID_META[k].color }} /> {GRID_META[k].label}
+            </div>
+          ))}
           <div>
             <span className="swatch dashed" /> smallest containing cell
           </div>

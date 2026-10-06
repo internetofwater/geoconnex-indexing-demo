@@ -1,5 +1,6 @@
 import type { FormEvent } from 'react'
 import type { AnalysisState, LookupStatus } from '../hooks/useIriAnalysis'
+import { CoveringExplainer } from './CoveringExplainer'
 import type { GridAnalysis } from '../lib/analysis'
 import { formatArea, formatLength, summarizeGeometry } from '../lib/geo'
 import type { GeoconnexFeature } from '../lib/geoconnex'
@@ -24,6 +25,9 @@ interface Props {
   results: Partial<Record<GridKind, AnalysisState>>
   showCover: boolean
   onShowCoverChange: (v: boolean) => void
+  /** Draw normalized (mixed-level) coverings instead of every level-N cell. */
+  mixedLevels: boolean
+  onMixedLevelsChange: (v: boolean) => void
 }
 
 const QUALITY_PREFIX: Record<GridAnalysis['count']['quality'], string> = { exact: '', upperBound: '≤\u00a0', estimate: '≈\u00a0' }
@@ -46,11 +50,13 @@ export function IriPanel(props: Props) {
   }
 
   const summary = feature ? summarizeGeometry(feature.geometry) : null
+  // Grids whose drawn covering mixes cell levels (big interior cells, small boundary cells).
+  const mixedKinds = GRID_KINDS.filter((k) => new Set(analysisOf(results[k])?.display.mixed.map((c) => c.level)).size > 1)
 
   return (
     <section className="panel">
       <h2>Feature coverage</h2>
-      <p className="muted small">Look up a Geoconnex IRI and compute how S2 and H3 cells cover its geometry.</p>
+      <p className="muted small">Look up a Geoconnex IRI and compute how S2, H3 and geohash cells cover its geometry.</p>
       <form className="iri-form" onSubmit={submit}>
         <input
           type="url"
@@ -130,7 +136,7 @@ export function IriPanel(props: Props) {
                   return (
                     <td key={k}>
                       <div className="big-number">
-                        {GRID_META[k].levelName.slice(0, 3).toLowerCase()} {a.smallest.level}
+                        {GRID_META[k].shortLevel} {a.smallest.level}
                       </div>
                       <code className="small">{a.smallest.id}</code>
                       <div className="muted small">{formatArea(cellAreaKm2(a.smallest))}</div>
@@ -187,7 +193,6 @@ export function IriPanel(props: Props) {
                         {QUALITY_PREFIX[a.count.quality]}
                         {formatCount(a.count.count)}
                       </div>
-                      {a.count.note && <div className="muted small">{a.count.note}</div>}
                       <div className="muted small">{stale ? 'recomputing…' : `${a.ms.toFixed(0)} ms`}</div>
                     </td>
                   )
@@ -196,19 +201,39 @@ export function IriPanel(props: Props) {
             </tbody>
           </table>
 
+          {GRID_KINDS.map((k) => {
+            const note = analysisOf(results[k])?.count.note
+            return note ? (
+              <div key={k} className="muted small count-note">
+                <strong style={{ color: GRID_META[k].color }}>{GRID_META[k].label}:</strong> {note}
+              </div>
+            ) : null
+          })}
+
           <label className="toggle">
             <input type="checkbox" checked={props.showCover} onChange={(e) => props.onShowCoverChange(e.target.checked)} />
             Draw coverings on map
           </label>
+          <label className="toggle sub-toggle">
+            <input
+              type="checkbox"
+              checked={props.mixedLevels}
+              disabled={!props.showCover}
+              onChange={(e) => props.onMixedLevelsChange(e.target.checked)}
+            />
+            Mixed levels <span className="muted small">(merge interior cells into coarser parents)</span>
+          </label>
           {props.showCover &&
             GRID_KINDS.map((k) => {
-              const note = analysisOf(results[k])?.displayNote
+              const d = analysisOf(results[k])?.display
+              const note = props.mixedLevels ? d?.mixedNote : d?.uniformNote
               return note ? (
                 <div key={k} className="muted small">
                   <strong style={{ color: GRID_META[k].color }}>{GRID_META[k].label}:</strong> {note}
                 </div>
               ) : null
             })}
+          {props.showCover && props.mixedLevels && mixedKinds.length > 0 && <CoveringExplainer kinds={mixedKinds} />}
         </div>
       )}
     </section>

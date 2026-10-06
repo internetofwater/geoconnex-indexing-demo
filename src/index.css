@@ -157,7 +157,7 @@ input[type='url'] {
 
 .app {
   display: grid;
-  grid-template-columns: 400px 1fr;
+  grid-template-columns: 440px 1fr;
   height: 100%;
 }
 
@@ -385,11 +385,12 @@ table.analysis thead th {
 table.analysis tbody th {
   font-weight: 500;
   font-size: 12px;
-  width: 34%;
+  width: 25%;
 }
 
 table.analysis td code {
   display: inline-block;
+  font-size: 11px;
   margin-top: 2px;
 }
 
@@ -454,6 +455,47 @@ td.stale {
 }
 
 table.analysis .big-number {
-  font-size: 16px;
+  font-size: 14px;
   overflow-wrap: anywhere;
+}
+
+.count-note {
+  margin-bottom: 6px;
+}
+
+.explainer {
+  margin-top: 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+}
+
+.explainer summary {
+  cursor: pointer;
+  padding: 8px 10px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.explainer-body {
+  padding: 0 10px 10px;
+}
+
+.explainer-body svg {
+  display: block;
+  margin: 4px auto 8px;
+  color: var(--text);
+}
+
+.explainer-body p {
+  margin: 0 0 8px;
+}
+
+.sub-toggle {
+  margin: 4px 0 6px 22px;
+  flex-wrap: wrap;
+}
+
+.toggle input:disabled + * {
+  opacity: 0.5;
 }

@@ -7,13 +7,14 @@ import 'maplibre-gl/dist/maplibre-gl.css'
 import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url'
 import { useEffect, useRef, useState } from 'react'
 import type { Bounds } from '../lib/geo'
-import { GRID_META, type GridCell, type GridKind } from '../lib/grids'
+import { GRID_KINDS, GRID_META, type GridCell, type GridKind } from '../lib/grids'
 
 maplibregl.setWorkerUrl(maplibreWorkerUrl)
 
 const STYLE_URL = 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json'
 const S2_COLOR = GRID_META.s2.color
 const H3_COLOR = GRID_META.h3.color
+const GEOHASH_COLOR = GRID_META.geohash.color
 
 export interface ResultFeature {
   kind: GridKind
@@ -33,7 +34,7 @@ export interface MapViewProps {
   onViewChange: (bounds: Bounds, zoom: number) => void
 }
 
-const kindColor: maplibregl.ExpressionSpecification = ['match', ['get', 'kind'], 's2', S2_COLOR, H3_COLOR]
+const kindColor: maplibregl.ExpressionSpecification = ['match', ['get', 'kind'], 's2', S2_COLOR, 'geohash', GEOHASH_COLOR, H3_COLOR]
 const isPolygon: maplibregl.ExpressionSpecification = ['match', ['geometry-type'], ['Polygon', 'MultiPolygon'], true, false]
 const isLine: maplibregl.ExpressionSpecification = ['match', ['geometry-type'], ['LineString', 'MultiLineString'], true, false]
 const isPoint: maplibregl.ExpressionSpecification = ['match', ['geometry-type'], ['Point', 'MultiPoint'], true, false]
@@ -52,12 +53,19 @@ function cellsToGeoJson(cells: GridCell[]): FeatureCollection<Polygon> {
 const EMPTY: FeatureCollection = { type: 'FeatureCollection', features: [] }
 
 function addLayers(map: maplibregl.Map) {
-  for (const id of ['grid-s2', 'grid-h3', 'iri-cover', 'iri-smallest', 'iri-feature', 'selected', 'results']) {
+  for (const id of ['grid-s2', 'grid-h3', 'grid-geohash', 'iri-cover', 'iri-smallest', 'iri-feature', 'selected', 'results']) {
     map.addSource(id, { type: 'geojson', data: EMPTY })
   }
 
+  map.addLayer({ id: 'grid-geohash-fill', type: 'fill', source: 'grid-geohash', paint: { 'fill-color': GEOHASH_COLOR, 'fill-opacity': 0.02 } })
   map.addLayer({ id: 'grid-h3-fill', type: 'fill', source: 'grid-h3', paint: { 'fill-color': H3_COLOR, 'fill-opacity': 0.02 } })
   map.addLayer({ id: 'grid-s2-fill', type: 'fill', source: 'grid-s2', paint: { 'fill-color': S2_COLOR, 'fill-opacity': 0.02 } })
+  map.addLayer({
+    id: 'grid-geohash-line',
+    type: 'line',
+    source: 'grid-geohash',
+    paint: { 'line-color': GEOHASH_COLOR, 'line-width': 1, 'line-opacity': 0.75, 'line-dasharray': [3, 2] },
+  })
   map.addLayer({ id: 'grid-h3-line', type: 'line', source: 'grid-h3', paint: { 'line-color': H3_COLOR, 'line-width': 1, 'line-opacity': 0.7 } })
   map.addLayer({ id: 'grid-s2-line', type: 'line', source: 'grid-s2', paint: { 'line-color': S2_COLOR, 'line-width': 1.2, 'line-opacity': 0.8 } })
 
@@ -152,16 +160,16 @@ export function MapView(props: MapViewProps) {
     map.on('moveend', emitView)
     map.on('click', (e) => callbacks.current.onCellClick(e.lngLat.lng, e.lngLat.lat))
     map.on('mousemove', (e: MapMouseEvent) => {
-      const layers = ['grid-s2-fill', 'grid-h3-fill'].filter((l) => map.getLayer(l))
+      const layers = GRID_KINDS.map((k) => `grid-${k}-fill`).filter((l) => map.getLayer(l))
       const hits = map.queryRenderedFeatures(e.point, { layers })
       const seen = new Set<string>()
       const lines = hits
         .map((f) => {
-          const kind = f.layer.id === 'grid-s2-fill' ? 's2' : 'h3'
-          return { kind: kind as GridKind, text: `${GRID_META[kind].label} ${f.properties.level} · ${f.properties.id}` }
+          const kind = f.layer.id.slice('grid-'.length, -'-fill'.length) as GridKind
+          return { kind, text: `${GRID_META[kind].label} ${f.properties.level} · ${f.properties.id}` }
         })
         .filter((l) => !seen.has(l.kind) && seen.add(l.kind))
-        .sort((a, b) => a.kind.localeCompare(b.kind))
+        .sort((a, b) => GRID_KINDS.indexOf(a.kind) - GRID_KINDS.indexOf(b.kind))
       setHover(lines.length ? { x: e.point.x, y: e.point.y, lines } : null)
     })
     map.on('mouseout', () => setHover(null))
@@ -173,8 +181,7 @@ export function MapView(props: MapViewProps) {
   useEffect(() => {
     if (!ready) return
     const map = mapRef.current!
-    ;(map.getSource('grid-s2') as GeoJSONSource).setData(cellsToGeoJson(gridCells.s2))
-    ;(map.getSource('grid-h3') as GeoJSONSource).setData(cellsToGeoJson(gridCells.h3))
+    for (const k of GRID_KINDS) (map.getSource(`grid-${k}`) as GeoJSONSource).setData(cellsToGeoJson(gridCells[k]))
   }, [ready, gridCells])
 
   useEffect(() => {

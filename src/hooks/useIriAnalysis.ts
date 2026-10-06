@@ -18,11 +18,13 @@ export type AnalysisState =
   | { state: 'error'; message: string }
 
 export const DEFAULT_N = 13
+/** Geohash tops out at precision 12; 8 (~38 × 19 m) is a comparable everyday choice. */
+export const DEFAULT_GEOHASH_N = 8
 
 export function useIriAnalysis() {
   const [status, setStatus] = useState<LookupStatus>({ state: 'idle' })
   const [feature, setFeature] = useState<GeoconnexFeature | null>(null)
-  const [levels, setLevels] = useState<Record<GridKind, number>>({ s2: DEFAULT_N, h3: DEFAULT_N })
+  const [levels, setLevels] = useState<Record<GridKind, number>>({ s2: DEFAULT_N, h3: DEFAULT_N, geohash: DEFAULT_GEOHASH_N })
   const [results, setResults] = useState<Partial<Record<GridKind, AnalysisState>>>({})
   const clients = useRef<Partial<Record<GridKind, AnalysisClient>>>({})
   const lookup = useRef<AbortController | null>(null)

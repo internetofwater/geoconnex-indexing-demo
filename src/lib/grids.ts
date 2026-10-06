@@ -1,22 +1,27 @@
 import * as h3 from 'h3-js'
 import { r1, s1, s2 } from 's2js'
 import { boundsAreaKm2, densifyGreatCircleRing, EARTH_RADIUS_KM, type Bounds, type LngLat } from './geo'
+import * as geohash from './geohash'
 
-export type GridKind = 's2' | 'h3'
+export type GridKind = 's2' | 'h3' | 'geohash'
 
-export const GRID_KINDS: GridKind[] = ['s2', 'h3']
+export const GRID_KINDS: GridKind[] = ['s2', 'h3', 'geohash']
 
-export const GRID_META: Record<GridKind, { label: string; levelName: string; min: number; max: number; color: string }> = {
-  s2: { label: 'S2', levelName: 'Level', min: 0, max: 30, color: '#2563eb' },
-  h3: { label: 'H3', levelName: 'Resolution', min: 0, max: 15, color: '#e8590c' },
+export const GRID_META: Record<
+  GridKind,
+  { label: string; levelName: string; shortLevel: string; min: number; max: number; color: string }
+> = {
+  s2: { label: 'S2', levelName: 'Level', shortLevel: 'lev', min: 0, max: 30, color: '#2563eb' },
+  h3: { label: 'H3', levelName: 'Resolution', shortLevel: 'res', min: 0, max: 15, color: '#e8590c' },
+  geohash: { label: 'Geohash', levelName: 'Precision', shortLevel: 'prec', min: 1, max: 12, color: '#9c36b5' },
 }
 
 export interface GridCell {
   kind: GridKind
-  /** S2 token or H3 index string */
+  /** S2 token, H3 index, or geohash string */
   id: string
   level: number
-  /** Closed ring, [lng, lat], densified along great circles */
+  /** Closed ring, [lng, lat] (S2/H3 densified along great circles) */
   ring: LngLat[]
 }
 
@@ -25,12 +30,13 @@ const R2D = 180 / Math.PI
 
 export function avgCellAreaKm2(kind: GridKind, level: number): number {
   if (kind === 'h3') return h3.getHexagonAreaAvg(level, 'km2')
+  if (kind === 'geohash') return (4 * Math.PI * EARTH_RADIUS_KM ** 2) / 32 ** level
   return (4 * Math.PI * EARTH_RADIUS_KM ** 2) / (6 * 4 ** level)
 }
 
 export function avgEdgeKm(kind: GridKind, level: number): number {
   if (kind === 'h3') return h3.getHexagonEdgeLengthAvg(level, 'km')
-  return Math.sqrt(avgCellAreaKm2('s2', level))
+  return Math.sqrt(avgCellAreaKm2(kind, level))
 }
 
 /** Number of interpolated segments per cell edge so coarse cells follow their true geodesic edges. */
@@ -50,6 +56,19 @@ export function cellFromId(kind: GridKind, id: string): GridCell {
     const level = s2.cellid.level(cid)
     return { kind, id, level, ring: densifyGreatCircleRing(ring, segmentsPerEdge(kind, level)) }
   }
+  if (kind === 'geohash') {
+    // Geohash cells are lng/lat rectangles: straight edges in the same planar sense the
+    // feature server uses, so no great-circle densification.
+    const b = geohash.decodeBounds(id)
+    const ring: LngLat[] = [
+      [b.west, b.south],
+      [b.east, b.south],
+      [b.east, b.north],
+      [b.west, b.north],
+      [b.west, b.south],
+    ]
+    return { kind, id, level: id.length, ring }
+  }
   const level = h3.getResolution(id)
   const ring = h3.cellToBoundary(id, true) as LngLat[]
   return { kind, id, level, ring: densifyGreatCircleRing(ring, segmentsPerEdge(kind, level)) }
@@ -64,6 +83,7 @@ export function cellIdAt(kind: GridKind, lng: number, lat: number, level: number
     const leaf = s2.cellid.fromLatLng(s2.LatLng.fromDegrees(lat, lng))
     return s2.cellid.toToken(s2.cellid.parent(leaf, level))
   }
+  if (kind === 'geohash') return geohash.encode(lat, wrapLng(lng), level)
   return h3.latLngToCell(lat, lng, level)
 }
 
@@ -75,6 +95,10 @@ export interface ViewportCells {
   cells: GridCell[]
   estimate: number
   tooMany: boolean
+}
+
+function wrapLng(lng: number): number {
+  return ((((lng + 180) % 360) + 360) % 360) - 180
 }
 
 function normalizeBounds(b: Bounds): Bounds {
@@ -115,6 +139,16 @@ export function viewportCells(kind: GridKind, bounds: Bounds, level: number, lim
     const rect = new s2.Rect(new r1.Interval(b.south * D2R, b.north * D2R), lng)
     const coverer = new s2.RegionCoverer({ minLevel: level, maxLevel: level, maxCells: limit * 2 })
     ids = coverer.covering(rect).map((c) => s2.cellid.toToken(c))
+  } else if (kind === 'geohash') {
+    const { width, height } = geohash.cellSizeDeg(level)
+    const set = new Set<string>()
+    const lngEnd = b.east - b.west >= 360 ? b.west + 360 : b.east
+    for (let lat = Math.floor(b.south / height) * height; lat < b.north; lat += height) {
+      for (let lng = Math.floor(b.west / width) * width; lng < lngEnd; lng += width) {
+        set.add(geohash.encode(lat + height / 2, wrapLng(lng + width / 2), level))
+      }
+    }
+    ids = [...set]
   } else {
     const set = new Set<string>()
     for (const ring of boundsToRings(b)) {
@@ -128,6 +162,7 @@ export function viewportCells(kind: GridKind, bounds: Bounds, level: number, lim
 
 export function cellAreaKm2(cell: GridCell): number {
   if (cell.kind === 'h3') return h3.cellArea(cell.id, 'km2')
+  if (cell.kind === 'geohash') return boundsAreaKm2(geohash.decodeBounds(cell.id))
   const area = s2.Cell.fromCellID(s2.cellid.fromToken(cell.id)).exactArea()
   return area * EARTH_RADIUS_KM ** 2
 }
